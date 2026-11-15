@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>台積電 (2330) K線圖｜日／週／月 + MA</title>
-  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     :root {
       --bg: #0f1419;
@@ -167,7 +166,7 @@
           <label><input type="checkbox" id="ma10" checked /> <span class="dot dot-ma10"></span> MA10</label>
           <label><input type="checkbox" id="ma20" checked /> <span class="dot dot-ma20"></span> MA20</label>
         </div>
-        <div class="status" id="status">準備載入…</div>
+        <div class="status" id="status">載入圖表套件…</div>
       </div>
     </div>
 
@@ -187,47 +186,15 @@
     const statusEl = document.getElementById("status");
     const statsEl = document.getElementById("stats");
 
-    if (typeof LightweightCharts === "undefined") {
-      statusEl.textContent = "圖表套件載入失敗，請重新整理";
-      statusEl.classList.add("error");
-    }
-
-    const chart = LightweightCharts.createChart(chartEl, {
-      layout: {
-        background: { type: "solid", color: "#1a2332" },
-        textColor: "#8b9bb4",
-      },
-      grid: {
-        vertLines: { color: "#243044" },
-        horzLines: { color: "#243044" },
-      },
-      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-      rightPriceScale: { borderColor: "#2a3548" },
-      timeScale: {
-        borderColor: "#2a3548",
-        timeVisible: true,
-        secondsVisible: false,
-      },
-      width: chartEl.clientWidth,
-      height: chartEl.clientHeight,
-    });
-
-    const candleSeries = chart.addCandlestickSeries({
-      upColor: "#22c55e",
-      downColor: "#ef4444",
-      borderUpColor: "#22c55e",
-      borderDownColor: "#ef4444",
-      wickUpColor: "#22c55e",
-      wickDownColor: "#ef4444",
-    });
-
-    const ma5Series = chart.addLineSeries({ color: "#f59e0b", lineWidth: 2, title: "MA5" });
-    const ma10Series = chart.addLineSeries({ color: "#a855f7", lineWidth: 2, title: "MA10" });
-    const ma20Series = chart.addLineSeries({ color: "#06b6d4", lineWidth: 2, title: "MA20" });
-
+    let chart, candleSeries, ma5Series, ma10Series, ma20Series;
     let dailyBars = [];
     let currentPeriod = "1d";
     let loading = false;
+
+    function setStatus(text, isError) {
+      statusEl.innerHTML = text;
+      statusEl.classList.toggle("error", !!isError);
+    }
 
     function rocToIso(roc) {
       const m = String(roc).match(/(\d+)\/(\d+)\/(\d+)/);
@@ -293,11 +260,6 @@
       return Array.from(months.values()).sort((a, b) => a.time.localeCompare(b.time));
     }
 
-    function setStatus(text, isError) {
-      statusEl.innerHTML = text;
-      statusEl.classList.toggle("error", !!isError);
-    }
-
     function updateStats(bars) {
       if (!bars.length) {
         statsEl.innerHTML = "";
@@ -322,6 +284,7 @@
     }
 
     function applyMAVisibility() {
+      if (!ma5Series) return;
       ma5Series.applyOptions({ visible: document.getElementById("ma5").checked });
       ma10Series.applyOptions({ visible: document.getElementById("ma10").checked });
       ma20Series.applyOptions({ visible: document.getElementById("ma20").checked });
@@ -431,7 +394,7 @@
     }
 
     async function load(period) {
-      if (loading) return;
+      if (loading || !chart) return;
       loading = true;
       currentPeriod = period;
       document.querySelectorAll(".tabs button").forEach((btn) => {
@@ -469,17 +432,80 @@
       }
     }
 
-    document.querySelectorAll(".tabs button").forEach((btn) => {
-      btn.addEventListener("click", () => load(btn.dataset.period));
-    });
-    ["ma5", "ma10", "ma20"].forEach((id) => {
-      document.getElementById(id).addEventListener("change", applyMAVisibility);
-    });
-    window.addEventListener("resize", () => {
-      chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
-    });
+    function initChart() {
+      chart = LightweightCharts.createChart(chartEl, {
+        layout: {
+          background: { type: "solid", color: "#1a2332" },
+          textColor: "#8b9bb4",
+        },
+        grid: {
+          vertLines: { color: "#243044" },
+          horzLines: { color: "#243044" },
+        },
+        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+        rightPriceScale: { borderColor: "#2a3548" },
+        timeScale: {
+          borderColor: "#2a3548",
+          timeVisible: true,
+          secondsVisible: false,
+        },
+        width: chartEl.clientWidth,
+        height: chartEl.clientHeight,
+      });
 
-    load("1d");
+      candleSeries = chart.addCandlestickSeries({
+        upColor: "#22c55e",
+        downColor: "#ef4444",
+        borderUpColor: "#22c55e",
+        borderDownColor: "#ef4444",
+        wickUpColor: "#22c55e",
+        wickDownColor: "#ef4444",
+      });
+
+      ma5Series = chart.addLineSeries({ color: "#f59e0b", lineWidth: 2, title: "MA5" });
+      ma10Series = chart.addLineSeries({ color: "#a855f7", lineWidth: 2, title: "MA10" });
+      ma20Series = chart.addLineSeries({ color: "#06b6d4", lineWidth: 2, title: "MA20" });
+
+      document.querySelectorAll(".tabs button").forEach((btn) => {
+        btn.addEventListener("click", () => load(btn.dataset.period));
+      });
+      ["ma5", "ma10", "ma20"].forEach((id) => {
+        document.getElementById(id).addEventListener("change", applyMAVisibility);
+      });
+      window.addEventListener("resize", () => {
+        if (chart) chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
+      });
+
+      load("1d");
+    }
+
+    function loadScript(src) {
+      return new Promise(function (resolve, reject) {
+        if (typeof LightweightCharts !== "undefined") {
+          resolve();
+          return;
+        }
+        const s = document.createElement("script");
+        s.src = src;
+        s.async = true;
+        s.onload = function () { resolve(); };
+        s.onerror = function () { reject(new Error("圖表套件下載失敗")); };
+        document.head.appendChild(s);
+      });
+    }
+
+    loadScript("https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js")
+      .then(function () {
+        if (typeof LightweightCharts === "undefined") {
+          throw new Error("LightweightCharts 仍未定義");
+        }
+        setStatus("圖表就緒，開始載入行情…");
+        initChart();
+      })
+      .catch(function (e) {
+        console.error(e);
+        setStatus("圖表套件載入失敗，請重新整理頁面 <button class=\"retry-btn\" onclick=\"location.reload()\">重試</button>", true);
+      });
   </script>
 </body>
 </html>
