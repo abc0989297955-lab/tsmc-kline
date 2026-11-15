@@ -132,7 +132,16 @@
       color: var(--muted);
       text-align: center;
     }
-    .footer a { color: #60a5fa; }
+    .retry-btn {
+      margin-left: 8px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
     @media (max-width: 640px) {
       #chart { height: 380px; }
       .status { width: 100%; margin-left: 0; }
@@ -158,7 +167,7 @@
           <label><input type="checkbox" id="ma10" checked /> <span class="dot dot-ma10"></span> MA10</label>
           <label><input type="checkbox" id="ma20" checked /> <span class="dot dot-ma20"></span> MA20</label>
         </div>
-        <div class="status" id="status">載入中…</div>
+        <div class="status" id="status">準備載入…</div>
       </div>
     </div>
 
@@ -168,8 +177,7 @@
     </div>
 
     <p class="footer">
-      資料來源：臺灣證券交易所公開資訊（STOCK_DAY）· 僅供參考，非投資建議<br />
-      本頁為單一 HTML 檔
+      資料來源：臺灣證券交易所公開資訊（STOCK_DAY）· 僅供參考，非投資建議
     </p>
   </div>
 
@@ -178,6 +186,11 @@
     const chartEl = document.getElementById("chart");
     const statusEl = document.getElementById("status");
     const statsEl = document.getElementById("stats");
+
+    if (typeof LightweightCharts === "undefined") {
+      statusEl.textContent = "圖表套件載入失敗，請重新整理";
+      statusEl.classList.add("error");
+    }
 
     const chart = LightweightCharts.createChart(chartEl, {
       layout: {
@@ -209,11 +222,12 @@
     });
 
     const ma5Series = chart.addLineSeries({ color: "#f59e0b", lineWidth: 2, title: "MA5" });
-    const ma10Series = chart.addLineSeries({ color: "#06b6d4", lineWidth: 2, title: "MA10" });
-    const ma20Series = chart.addLineSeries({ color: "#a855f7", lineWidth: 2, title: "MA20" });
+    const ma10Series = chart.addLineSeries({ color: "#a855f7", lineWidth: 2, title: "MA10" });
+    const ma20Series = chart.addLineSeries({ color: "#06b6d4", lineWidth: 2, title: "MA20" });
 
     let dailyBars = [];
     let currentPeriod = "1d";
+    let loading = false;
 
     function rocToIso(roc) {
       const m = String(roc).match(/(\d+)\/(\d+)\/(\d+)/);
@@ -280,25 +294,31 @@
     }
 
     function setStatus(text, isError) {
-      statusEl.textContent = text;
+      statusEl.innerHTML = text;
       statusEl.classList.toggle("error", !!isError);
     }
 
     function updateStats(bars) {
-      if (!bars.length) { statsEl.innerHTML = ""; return; }
+      if (!bars.length) {
+        statsEl.innerHTML = "";
+        return;
+      }
       const last = bars[bars.length - 1];
-      const highs = bars.map(function(b) { return b.high; });
-      const lows = bars.map(function(b) { return b.low; });
-      const maxH = Math.max.apply(null, highs);
-      const minL = Math.min.apply(null, lows);
+      const highs = bars.map((b) => b.high);
+      const lows = bars.map((b) => b.low);
+      const maxH = Math.max(...highs);
+      const minL = Math.min(...lows);
       const change = last.close - bars[0].open;
       const changePct = ((change / bars[0].open) * 100).toFixed(2);
       const chColor = change >= 0 ? "var(--up)" : "var(--down)";
-      statsEl.innerHTML = '<div class="stat"><div class="label">最新收盤</div><div class="value">' + last.close.toFixed(1) + '</div></div>' +
-        '<div class="stat"><div class="label">區間漲跌</div><div class="value" style="color:' + chColor + '">' + (change >= 0 ? "+" : "") + change.toFixed(1) + " (" + changePct + "%)</div></div>" +
-        '<div class="stat"><div class="label">區間最高</div><div class="value">' + maxH.toFixed(1) + '</div></div>' +
-        '<div class="stat"><div class="label">區間最低</div><div class="value">' + minL.toFixed(1) + '</div></div>' +
-        '<div class="stat"><div class="label">K線數量</div><div class="value">' + bars.length + '</div></div>';
+
+      statsEl.innerHTML =
+        '<div class="stat"><div class="label">最新收盤</div><div class="value">' + last.close.toFixed(1) + "</div></div>" +
+        '<div class="stat"><div class="label">區間漲跌</div><div class="value" style="color:' + chColor + '">' +
+        (change >= 0 ? "+" : "") + change.toFixed(1) + " (" + changePct + "%)</div></div>" +
+        '<div class="stat"><div class="label">區間最高</div><div class="value">' + maxH.toFixed(1) + "</div></div>" +
+        '<div class="stat"><div class="label">區間最低</div><div class="value">' + minL.toFixed(1) + "</div></div>" +
+        '<div class="stat"><div class="label">K線數量</div><div class="value">' + bars.length + "</div></div>";
     }
 
     function applyMAVisibility() {
@@ -330,12 +350,44 @@
       return keys;
     }
 
+    function sleep(ms) {
+      return new Promise((r) => setTimeout(r, ms));
+    }
+
+    async function fetchJson(url) {
+      try {
+        const res = await fetch(url, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        if (res.ok) return await res.json();
+      } catch (e) {
+        console.warn("direct fetch failed", e);
+      }
+
+      const proxies = [
+        "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
+        "https://corsproxy.io/?" + encodeURIComponent(url),
+      ];
+      for (const p of proxies) {
+        try {
+          const res = await fetch(p, { cache: "no-store" });
+          if (res.ok) {
+            const text = await res.text();
+            return JSON.parse(text);
+          }
+        } catch (e) {
+          console.warn("proxy failed", p, e);
+        }
+      }
+      throw new Error("無法連上證交所（含代理）");
+    }
+
     async function fetchMonth(dateKey) {
       const url = "https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=" + dateKey + "&stockNo=" + STOCK_NO;
-      const res = await fetch(url, { headers: { Accept: "application/json" } });
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      const data = await res.json();
-      if (data.stat !== "OK" || !Array.isArray(data.data)) return [];
+      const data = await fetchJson(url);
+      if (!data || data.stat !== "OK" || !Array.isArray(data.data)) return [];
       const bars = [];
       for (const row of data.data) {
         const time = rocToIso(row[0]);
@@ -350,51 +402,83 @@
     }
 
     async function loadDailyData() {
-      setStatus("正在從證交所載入…");
       const keys = recentMonthKeys(7);
-      const results = await Promise.all(keys.map(function(k) { return fetchMonth(k).catch(function() { return []; }); }));
       const map = new Map();
-      for (const monthBars of results) {
-        for (const b of monthBars) map.set(b.time, b);
+      let okCount = 0;
+
+      for (let i = 0; i < keys.length; i++) {
+        setStatus("載入中… (" + (i + 1) + "/" + keys.length + ")");
+        try {
+          const monthBars = await fetchMonth(keys[i]);
+          for (const b of monthBars) map.set(b.time, b);
+          if (monthBars.length) okCount++;
+        } catch (e) {
+          console.warn("month fail", keys[i], e);
+        }
+        if (i < keys.length - 1) await sleep(300);
       }
-      const bars = Array.from(map.values()).sort(function(a, b) { return a.time.localeCompare(b.time); });
+
+      const bars = Array.from(map.values()).sort((a, b) => a.time.localeCompare(b.time));
       const sixMonthsAgo = new Date();
       sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
       const cutoff = sixMonthsAgo.toISOString().slice(0, 10);
-      dailyBars = bars.filter(function(b) { return b.time >= cutoff; });
-      if (!dailyBars.length) throw new Error("沒有取得任何交易日資料");
+      dailyBars = bars.filter((b) => b.time >= cutoff);
+
+      if (!dailyBars.length) {
+        throw new Error("沒有取得交易日資料（成功月份：" + okCount + "）");
+      }
       return dailyBars;
     }
 
     async function load(period) {
+      if (loading) return;
+      loading = true;
       currentPeriod = period;
-      document.querySelectorAll(".tabs button").forEach(function(btn) {
+      document.querySelectorAll(".tabs button").forEach((btn) => {
         btn.classList.toggle("active", btn.dataset.period === period);
       });
+
       try {
-        if (!dailyBars.length) await loadDailyData();
+        if (!dailyBars.length) {
+          await loadDailyData();
+        }
         let bars;
         if (period === "1wk") bars = toWeekly(dailyBars);
         else if (period === "1mo") bars = toMonthly(dailyBars);
         else bars = dailyBars;
+
         render(bars);
         const label = period === "1d" ? "日線" : period === "1wk" ? "週線" : "月線";
         setStatus(label + " · " + bars.length + " 根 · 已更新");
       } catch (e) {
         console.error(e);
-        setStatus("資料載入失敗：" + (e.message || "請稍後再試"), true);
+        setStatus(
+          "載入失敗：" + (e.message || "請稍後再試") +
+          ' <button class="retry-btn" id="retryBtn">重試</button>',
+          true
+        );
+        const btn = document.getElementById("retryBtn");
+        if (btn) {
+          btn.onclick = function () {
+            dailyBars = [];
+            load(currentPeriod);
+          };
+        }
+      } finally {
+        loading = false;
       }
     }
 
-    document.querySelectorAll(".tabs button").forEach(function(btn) {
-      btn.addEventListener("click", function() { load(btn.dataset.period); });
+    document.querySelectorAll(".tabs button").forEach((btn) => {
+      btn.addEventListener("click", () => load(btn.dataset.period));
     });
-    ["ma5", "ma10", "ma20"].forEach(function(id) {
+    ["ma5", "ma10", "ma20"].forEach((id) => {
       document.getElementById(id).addEventListener("change", applyMAVisibility);
     });
-    window.addEventListener("resize", function() {
+    window.addEventListener("resize", () => {
       chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
     });
+
     load("1d");
   </script>
 </body>
