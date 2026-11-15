@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>台積電 (2330) K線圖｜日／週／月 + MA</title>
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2a3548;
+      --text: #e7ecf3;
+      --muted: #8b9bb4;
+      --accent: #3b82f6;
+      --up: #22c55e;
+      --down: #ef4444;
+      --ma5: #f59e0b;
+      --ma10: #a855f7;
+      --ma20: #06b6d4;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Segoe UI", "Noto Sans TC", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 20px 16px 40px;
+    }
+    header { margin-bottom: 20px; }
+    header h1 {
+      font-size: 1.45rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+    header p {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-top: 4px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 14px;
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 20px;
+      align-items: center;
+    }
+    .tabs {
+      display: flex;
+      gap: 6px;
+      background: #121820;
+      padding: 4px;
+      border-radius: 8px;
+    }
+    .tabs button {
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      padding: 7px 16px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .tabs button.active {
+      background: var(--accent);
+      color: #fff;
+    }
+    .tabs button:hover:not(.active) {
+      color: var(--text);
+      background: #243044;
+    }
+    .ma-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      align-items: center;
+    }
+    .ma-group label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      user-select: none;
+    }
+    .ma-group input { accent-color: var(--accent); width: 16px; height: 16px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .dot-ma5 { background: var(--ma5); }
+    .dot-ma10 { background: var(--ma10); }
+    .dot-ma20 { background: var(--ma20); }
+    .status {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-left: auto;
+    }
+    .status.error { color: #f87171; }
+    #chart {
+      width: 100%;
+      height: 480px;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .stat {
+      background: #121820;
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .stat .label { font-size: 0.75rem; color: var(--muted); }
+    .stat .value { font-size: 1.05rem; font-weight: 600; margin-top: 2px; }
+    .footer {
+      margin-top: 18px;
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-align: center;
+    }
+    .footer a { color: #60a5fa; }
+    @media (max-width: 640px) {
+      #chart { height: 380px; }
+      .status { width: 100%; margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>台積電 (2330) K線圖</h1>
+      <p>最近約半年資料 · 日線／週線／月線 · MA5／MA10／MA20 可勾選</p>
+    </header>
+
+    <div class="panel">
+      <div class="controls">
+        <div class="tabs" role="tablist">
+          <button type="button" data-period="1d" class="active">日線</button>
+          <button type="button" data-period="1wk">週線</button>
+          <button type="button" data-period="1mo">月線</button>
+        </div>
+        <div class="ma-group">
+          <label><input type="checkbox" id="ma5" checked /> <span class="dot dot-ma5"></span> MA5</label>
+          <label><input type="checkbox" id="ma10" checked /> <span class="dot dot-ma10"></span> MA10</label>
+          <label><input type="checkbox" id="ma20" checked /> <span class="dot dot-ma20"></span> MA20</label>
+        </div>
+        <div class="status" id="status">載入中…</div>
+      </div>
+    </div>
+
+    <div class="panel" style="padding: 8px;">
+      <div id="chart"></div>
+      <div class="stats" id="stats"></div>
+    </div>
+
+    <p class="footer">
+      資料來源：臺灣證券交易所公開資訊（STOCK_DAY）· 僅供參考，非投資建議<br />
+      本頁為單一 HTML 檔
+    </p>
+  </div>
+
+  <script>
+    const STOCK_NO = "2330";
+    const chartEl = document.getElementById("chart");
+    const statusEl = document.getElementById("status");
+    const statsEl = document.getElementById("stats");
+
+    const chart = LightweightCharts.createChart(chartEl, {
+      layout: {
+        background: { type: "solid", color: "#1a2332" },
+        textColor: "#8b9bb4",
+      },
+      grid: {
+        vertLines: { color: "#243044" },
+        horzLines: { color: "#243044" },
+      },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      rightPriceScale: { borderColor: "#2a3548" },
+      timeScale: {
+        borderColor: "#2a3548",
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      width: chartEl.clientWidth,
+      height: chartEl.clientHeight,
+    });
+
+    const candleSeries = chart.addCandlestickSeries({
+      upColor: "#22c55e",
+      downColor: "#ef4444",
+      borderUpColor: "#22c55e",
+      borderDownColor: "#ef4444",
+      wickUpColor: "#22c55e",
+      wickDownColor: "#ef4444",
+    });
+
+    const ma5Series = chart.addLineSeries({ color: "#f59e0b", lineWidth: 2, title: "MA5" });
+    const ma10Series = chart.addLineSeries({ color: "#06b6d4", lineWidth: 2, title: "MA10" });
+    const ma20Series = chart.addLineSeries({ color: "#a855f7", lineWidth: 2, title: "MA20" });
+
+    let dailyBars = [];
+    let currentPeriod = "1d";
+
+    function rocToIso(roc) {
+      const m = String(roc).match(/(\d+)\/(\d+)\/(\d+)/);
+      if (!m) return null;
+      const y = parseInt(m[1], 10) + 1911;
+      return y + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0");
+    }
+
+    function parseNum(s) {
+      if (s == null || s === "" || s === "--" || s === "—") return null;
+      const n = parseFloat(String(s).replace(/,/g, ""));
+      return isNaN(n) ? null : n;
+    }
+
+    function sma(bars, period) {
+      const out = [];
+      for (let i = 0; i < bars.length; i++) {
+        if (i < period - 1) continue;
+        let sum = 0;
+        for (let j = i - period + 1; j <= i; j++) sum += bars[j].close;
+        out.push({ time: bars[i].time, value: +(sum / period).toFixed(2) });
+      }
+      return out;
+    }
+
+    function toWeekly(daily) {
+      if (!daily.length) return [];
+      const weeks = new Map();
+      for (const b of daily) {
+        const d = new Date(b.time + "T00:00:00");
+        const day = d.getDay();
+        const monday = new Date(d);
+        monday.setDate(d.getDate() - ((day + 6) % 7));
+        const key = monday.toISOString().slice(0, 10);
+        if (!weeks.has(key)) {
+          weeks.set(key, { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close });
+        } else {
+          const w = weeks.get(key);
+          w.high = Math.max(w.high, b.high);
+          w.low = Math.min(w.low, b.low);
+          w.close = b.close;
+          w.time = b.time;
+        }
+      }
+      return Array.from(weeks.values()).sort((a, b) => a.time.localeCompare(b.time));
+    }
+
+    function toMonthly(daily) {
+      if (!daily.length) return [];
+      const months = new Map();
+      for (const b of daily) {
+        const key = b.time.slice(0, 7);
+        if (!months.has(key)) {
+          months.set(key, { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close });
+        } else {
+          const m = months.get(key);
+          m.high = Math.max(m.high, b.high);
+          m.low = Math.min(m.low, b.low);
+          m.close = b.close;
+          m.time = b.time;
+        }
+      }
+      return Array.from(months.values()).sort((a, b) => a.time.localeCompare(b.time));
+    }
+
+    function setStatus(text, isError) {
+      statusEl.textContent = text;
+      statusEl.classList.toggle("error", !!isError);
+    }
+
+    function updateStats(bars) {
+      if (!bars.length) { statsEl.innerHTML = ""; return; }
+      const last = bars[bars.length - 1];
+      const highs = bars.map(function(b) { return b.high; });
+      const lows = bars.map(function(b) { return b.low; });
+      const maxH = Math.max.apply(null, highs);
+      const minL = Math.min.apply(null, lows);
+      const change = last.close - bars[0].open;
+      const changePct = ((change / bars[0].open) * 100).toFixed(2);
+      const chColor = change >= 0 ? "var(--up)" : "var(--down)";
+      statsEl.innerHTML = '<div class="stat"><div class="label">最新收盤</div><div class="value">' + last.close.toFixed(1) + '</div></div>' +
+        '<div class="stat"><div class="label">區間漲跌</div><div class="value" style="color:' + chColor + '">' + (change >= 0 ? "+" : "") + change.toFixed(1) + " (" + changePct + "%)</div></div>" +
+        '<div class="stat"><div class="label">區間最高</div><div class="value">' + maxH.toFixed(1) + '</div></div>' +
+        '<div class="stat"><div class="label">區間最低</div><div class="value">' + minL.toFixed(1) + '</div></div>' +
+        '<div class="stat"><div class="label">K線數量</div><div class="value">' + bars.length + '</div></div>';
+    }
+
+    function applyMAVisibility() {
+      ma5Series.applyOptions({ visible: document.getElementById("ma5").checked });
+      ma10Series.applyOptions({ visible: document.getElementById("ma10").checked });
+      ma20Series.applyOptions({ visible: document.getElementById("ma20").checked });
+    }
+
+    function render(bars) {
+      candleSeries.setData(bars);
+      ma5Series.setData(sma(bars, 5));
+      ma10Series.setData(sma(bars, 10));
+      ma20Series.setData(sma(bars, 20));
+      applyMAVisibility();
+      chart.timeScale().fitContent();
+      updateStats(bars);
+    }
+
+    function recentMonthKeys(count) {
+      count = count || 7;
+      const keys = [];
+      const now = new Date();
+      for (let i = 0; i < count; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        keys.push(y + m + "01");
+      }
+      return keys;
+    }
+
+    async function fetchMonth(dateKey) {
+      const url = "https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=" + dateKey + "&stockNo=" + STOCK_NO;
+      const res = await fetch(url, { headers: { Accept: "application/json" } });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const data = await res.json();
+      if (data.stat !== "OK" || !Array.isArray(data.data)) return [];
+      const bars = [];
+      for (const row of data.data) {
+        const time = rocToIso(row[0]);
+        const open = parseNum(row[3]);
+        const high = parseNum(row[4]);
+        const low = parseNum(row[5]);
+        const close = parseNum(row[6]);
+        if (!time || open == null || high == null || low == null || close == null) continue;
+        bars.push({ time: time, open: open, high: high, low: low, close: close });
+      }
+      return bars;
+    }
+
+    async function loadDailyData() {
+      setStatus("正在從證交所載入…");
+      const keys = recentMonthKeys(7);
+      const results = await Promise.all(keys.map(function(k) { return fetchMonth(k).catch(function() { return []; }); }));
+      const map = new Map();
+      for (const monthBars of results) {
+        for (const b of monthBars) map.set(b.time, b);
+      }
+      const bars = Array.from(map.values()).sort(function(a, b) { return a.time.localeCompare(b.time); });
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+      const cutoff = sixMonthsAgo.toISOString().slice(0, 10);
+      dailyBars = bars.filter(function(b) { return b.time >= cutoff; });
+      if (!dailyBars.length) throw new Error("沒有取得任何交易日資料");
+      return dailyBars;
+    }
+
+    async function load(period) {
+      currentPeriod = period;
+      document.querySelectorAll(".tabs button").forEach(function(btn) {
+        btn.classList.toggle("active", btn.dataset.period === period);
+      });
+      try {
+        if (!dailyBars.length) await loadDailyData();
+        let bars;
+        if (period === "1wk") bars = toWeekly(dailyBars);
+        else if (period === "1mo") bars = toMonthly(dailyBars);
+        else bars = dailyBars;
+        render(bars);
+        const label = period === "1d" ? "日線" : period === "1wk" ? "週線" : "月線";
+        setStatus(label + " · " + bars.length + " 根 · 已更新");
+      } catch (e) {
+        console.error(e);
+        setStatus("資料載入失敗：" + (e.message || "請稍後再試"), true);
+      }
+    }
+
+    document.querySelectorAll(".tabs button").forEach(function(btn) {
+      btn.addEventListener("click", function() { load(btn.dataset.period); });
+    });
+    ["ma5", "ma10", "ma20"].forEach(function(id) {
+      document.getElementById(id).addEventListener("change", applyMAVisibility);
+    });
+    window.addEventListener("resize", function() {
+      chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
+    });
+    load("1d");
+  </script>
+</body>
+</html>
